@@ -4,6 +4,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <cairo.h>
+#include <string.h>
 
 static GtkWidget *main_window;
 static GtkWidget *device_window;
