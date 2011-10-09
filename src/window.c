@@ -153,6 +153,32 @@ static void menu_item_onclick(gchar *sender) {
         show_device_dialog();
     }
 }
+
+gboolean expose_event_callback(GtkWidget *widget, GdkEventExpose *event, gpointer data) {
+    gdk_draw_arc(widget->window,
+        widget->style->fg_gc[gtk_widget_get_state(widget)],
+        TRUE,
+        0, 0, widget->allocation.width, widget->allocation.height,
+        0, 64 * 360
+    );
+    return TRUE;
+}
+
+
+gboolean update_source_stream(GtkWidget *widget) {
+    if (widget->window == NULL) 
+        return FALSE;
+
+    if (capture_device_instance.active == 0)
+        return TRUE;
+    
+    // read frame from input source
+    frameRead();
+    
+    gtk_widget_queue_draw(widget);
+    return TRUE;
+}
+
 /* getter */
 GtkWidget *get_main_window() {
 	return main_window;
@@ -170,11 +196,7 @@ GtkWidget* get_main_menu_widget(GtkWidget *window) {
     /* We do need to show menu items */
     gtk_widget_show(open_capture_item);
 
-
     GtkWidget* menu_bar = gtk_menu_bar_new();
-    gtk_container_add(GTK_CONTAINER(window), menu_bar);
-    gtk_widget_show(menu_bar);
-
     GtkWidget* file_item = gtk_menu_item_new_with_label("Device");
     gtk_widget_show(file_item);
 
@@ -198,11 +220,20 @@ void create_main_window() {
     GtkWidget* main_vbox = gtk_vbox_new(FALSE, 1);
     gtk_container_border_width(GTK_CONTAINER(main_vbox), 1);
     gtk_container_add(GTK_CONTAINER(main_window), main_vbox);
-    gtk_widget_show(main_vbox);
+    //gtk_widget_show(main_vbox);
     
     GtkWidget* menubar = get_main_menu_widget(main_window); 
     gtk_box_pack_start(GTK_BOX(main_vbox), menubar, FALSE, TRUE, 0);
-    gtk_widget_show(menubar);
+    //gtk_widget_show(menubar);
+
+    GtkWidget *drawing_area = gtk_drawing_area_new();
+    gtk_widget_set_size_request(drawing_area, 700, 500);
+    g_signal_connect(G_OBJECT(drawing_area), "expose_event",
+        G_CALLBACK(expose_event_callback), NULL);
+
+    gtk_box_pack_start(GTK_BOX(main_vbox), drawing_area, FALSE, TRUE, 0);
+
+    g_timeout_add(1000, (GSourceFunc)update_source_stream, (gpointer)main_window);
     
-    gtk_widget_show(main_window);
+    gtk_widget_show_all(main_window);
 }

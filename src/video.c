@@ -32,8 +32,124 @@ void readInit(unsigned int buffer_size) {
     }
 }
 
+void YUV422toRGB888(unsigned char *src) {
+    int line, column;
+    unsigned char *py, *pu, *pv;
+    unsigned char *tmp = capture_device_instance.image_buffer;
+
+    /* In this format each four bytes is two pixels. Each four bytes is two Y's, a Cb and a Cr. 
+     Each Y goes to one of the pixels, and the Cb and Cr belong to both pixels. */
+    py = src;
+    pu = src + 1;
+    pv = src + 3;
+
+    #define CLIP(x) ( (x)>=0xFF ? 0xFF : ( (x) <= 0x00 ? 0x00 : (x) ) )
+
+    for (line = 0; line < capture_device_instance.height; ++line) {
+        for (column = 0; column < capture_device_instance.width; ++column) {
+            *tmp++ = CLIP((double)*py + 1.402*((double)*pv-128.0));
+            *tmp++ = CLIP((double)*py - 0.344*((double)*pu-128.0) - 0.714*((double)*pv-128.0));      
+            *tmp++ = CLIP((double)*py + 1.772*((double)*pu-128.0));
+
+            // increase py every time
+            py += 2;
+            // increase pu,pv every second time
+            if ((column & 1)==1) {
+                pu += 4;
+                pv += 4;
+            }
+        }
+    }
+}
+
+void imageProcess(const void* p) {
+    unsigned char* src = (unsigned char*)p;
+    
+    // convert from YUV422 to RGB888
+    YUV422toRGB888(src);
+}
+
+/* read a frame */
+int frameRead(void) {
+    struct v4l2_buffer buf;
+    unsigned int i;
+
+    switch (io) {
+        case IO_METHOD_READ:
+            if (-1 == read(capture_device_instance.file_descriptor, 
+                capture_device_instance.capture_buffer[0].start, 
+                capture_device_instance.capture_buffer[0].length)) {
+                switch (errno) {
+                    case EAGAIN:
+                        return 0;
+                    case EIO:
+                        // Could ignore EIO, see spec.
+                        // fall through
+                    default:
+                        errno_exit("read");
+                }
+            }
+
+            imageProcess(capture_device_instance.capture_buffer[0].start);
+            break;
+        case IO_METHOD_MMAP:
+            ZEROMEM(buf);
+            buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            buf.memory = V4L2_MEMORY_MMAP;
+
+            if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_DQBUF, &buf)) {
+                switch (errno) {
+                    case EAGAIN:
+                        return 0;
+                    case EIO:
+                        // Could ignore EIO, see spec
+                        // fall through
+                    default:
+                        errno_exit("VIDIOC_DQBUF");
+                }
+            }
+
+            imageProcess(capture_device_instance.capture_buffer[buf.index].start);
+
+            if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_QBUF, &buf))
+                errno_exit("VIDIOC_QBUF");
+            break;
+        case IO_METHOD_USERPTR:
+            ZEROMEM(buf);
+
+            buf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            buf.memory = V4L2_MEMORY_USERPTR;
+
+            if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_DQBUF, &buf)) {
+                switch (errno) {
+                    case EAGAIN:
+                        return 0;
+                    case EIO:
+                        // Could ignore EIO, see spec.
+                        // fall through
+                    default:
+                        errno_exit("VIDIOC_DQBUF");
+                }
+            }
+
+            for (i = 0; i < capture_device_instance.n_buffers; ++i)
+                if (buf.m.userptr == (unsigned long) capture_device_instance.capture_buffer[i].start 
+                    && buf.length == capture_device_instance.capture_buffer[i].length)
+                    break;
+
+            imageProcess((void*)buf.m.userptr);
+
+            if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_QBUF, &buf))
+                errno_exit("VIDIOC_QBUF");
+            break;
+    }
+
+    return 1;
+}
+
 void mmapInit(void) {
     struct v4l2_requestbuffers req;
+    enum v4l2_buf_type type;
     ZEROMEM(req);
 
     req.count  = 4;
@@ -87,12 +203,33 @@ void mmapInit(void) {
             errno_exit("mmap");
         }
     }
+
+    // prepare capturing
+    int i;
+    for (i = 0; i < capture_device_instance.n_buffers; ++i) {
+        struct v4l2_buffer buf;
+        ZEROMEM(buf);
+
+        buf.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory = V4L2_MEMORY_MMAP;
+        buf.index  = i;
+
+        if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_QBUF, &buf))
+            errno_exit("VIDIOC_QBUF");
+    }
+                
+    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_STREAMON, &type))
+        errno_exit("VIDIOC_STREAMON");
 }
 
 void userptrInit(unsigned int buffer_size) {
     struct v4l2_requestbuffers req;
+    enum v4l2_buf_type type;
     unsigned int page_size;
-
+    int i;
+    
     page_size = getpagesize();
     buffer_size = (buffer_size + page_size - 1) & ~(page_size - 1);
 
@@ -127,9 +264,31 @@ void userptrInit(unsigned int buffer_size) {
             exit(EXIT_FAILURE);
         }
     }
+
+    for (i = 0; i < capture_device_instance.n_buffers; ++i) {
+        struct v4l2_buffer buf;
+        ZEROMEM(buf);
+
+        buf.type      = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory    = V4L2_MEMORY_USERPTR;
+        buf.index     = i;
+        buf.m.userptr = (unsigned long)capture_device_instance.capture_buffer[i].start;
+        buf.length    = capture_device_instance.capture_buffer[i].length;
+
+        if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_QBUF, &buf)) {
+            errno_exit("VIDIOC_QBUF");
+        }
+    }
+
+    type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+
+    if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_STREAMON, &type))
+        errno_exit("VIDIOC_STREAMON");
 }
 
 void close_video_device() {
+    enum v4l2_buf_type type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    
     if (capture_device_instance.active) {
         unsigned int i;
 
@@ -138,16 +297,26 @@ void close_video_device() {
                 free(capture_device_instance.capture_buffer[0].start);
                 break;
             case IO_METHOD_MMAP:
-                for (i = 0; i < capture_device_instance.n_buffers; ++i)
+                if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_STREAMOFF, &type)) {
+                    errno_exit("VIDIOC_STREAMOFF");
+                }
+                for (i = 0; i < capture_device_instance.n_buffers; ++i) {
                     if (-1 == munmap(
                         capture_device_instance.capture_buffer[i].start, 
                         capture_device_instance.capture_buffer[i].length)) {
                         errno_exit("munmap");
                     }
+                }
+        
                 break;
             case IO_METHOD_USERPTR:
-                for (i = 0; i < capture_device_instance.n_buffers; ++i)
+                if (-1 == xioctl(capture_device_instance.file_descriptor, VIDIOC_STREAMOFF, &type)) {
+                    errno_exit("VIDIOC_STREAMOFF");
+                }
+                
+                for (i = 0; i < capture_device_instance.n_buffers; ++i) {
                     free(capture_device_instance.capture_buffer[i].start);
+                }
                 break;
         }
 
@@ -157,6 +326,10 @@ void close_video_device() {
     }
 
     capture_device_instance.active = 0;
+    if (capture_device_instance.image_buffer_size) {
+        free(capture_device_instance.image_buffer);
+        capture_device_instance.image_buffer_size = 0;
+    }
 }
 
 void open_video_device(char* device_name) {
@@ -295,6 +468,12 @@ void open_video_device(char* device_name) {
     }
 
     capture_device_instance.active = 1;
+    // create rgb image buffer
+    capture_device_instance.image_buffer_size = width * height * 3 * sizeof(char);
+    capture_device_instance.image_buffer = malloc(capture_device_instance.image_buffer_size);
+    capture_device_instance.width = width;
+    capture_device_instance.height = height;
+    
     printf("Device opend\n");
 }
 
@@ -354,6 +533,6 @@ void setup_video_interface() {
 }
 /*  */
 void cleanup_video_interface() {
-    free_capture_list();
+    printf("Close device\n");
     close_video_device();
 }

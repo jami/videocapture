@@ -12,7 +12,6 @@ int main(int argc, char **argv) {
     
 	gtk_main();
 
-    //cleanup_video_interface();
-    
+    cleanup_video_interface();
 	return 0;
 }
