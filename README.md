@@ -5,7 +5,7 @@
 This is the almighty videocapturing - processing - i dont really know program.
 It captures camera images and process them.  
 
-<img alt="First screen" src="https://github.com/jami//raw/master/screenshot.png" width="276" height="537" />
+<img alt="First screen" src="https://github.com/jami/videocapture/raw/master/doc/screen/feedback.png" />
 
 ###Linux users:
 
