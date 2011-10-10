@@ -35,7 +35,7 @@ void readInit(unsigned int buffer_size) {
 void YUV422toRGB888(unsigned char *src) {
     int line, column;
     unsigned char *py, *pu, *pv;
-    unsigned char *tmp = capture_device_instance.image_buffer;
+    unsigned char *tmp = (unsigned char*)capture_device_instance.image_buffer;
 
     /* In this format each four bytes is two pixels. Each four bytes is two Y's, a Cb and a Cr. 
      Each Y goes to one of the pixels, and the Cb and Cr belong to both pixels. */

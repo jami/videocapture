@@ -136,8 +136,10 @@ void show_device_dialog() {
     g_signal_connect(activate, "clicked", 
         G_CALLBACK(on_device_activate), NULL);
     
-    GtkWidget* ok = gtk_button_new_with_label("OK");
+    GtkWidget* ok = gtk_button_new_with_label("Close");
     gtk_widget_set_size_request(ok, 70, 30);
+    g_signal_connect(ok, "clicked", 
+        G_CALLBACK(on_device_activate), NULL);
     gtk_table_attach(GTK_TABLE(table), ok, 3, 4, 4, 5, 
         GTK_FILL, GTK_FILL, 0, 0);
 
@@ -155,12 +157,12 @@ static void menu_item_onclick(gchar *sender) {
 }
 
 gboolean expose_event_callback(GtkWidget *widget, GdkEventExpose *event, gpointer data) {
-    gdk_draw_arc(widget->window,
+    /*gdk_draw_arc(widget->window,
         widget->style->fg_gc[gtk_widget_get_state(widget)],
         TRUE,
         0, 0, widget->allocation.width, widget->allocation.height,
         0, 64 * 360
-    );
+    );*/
     return TRUE;
 }
 
@@ -174,8 +176,20 @@ gboolean update_source_stream(GtkWidget *widget) {
     
     // read frame from input source
     frameRead();
+
+    gdk_draw_rgb_image(
+        image_widget->window, 
+        image_widget->style->fg_gc[GTK_STATE_NORMAL],
+        0, 
+        0, 
+        capture_device_instance.width, 
+        capture_device_instance.height,
+        GDK_RGB_DITHER_MAX, 
+        capture_device_instance.image_buffer, 
+        capture_device_instance.width * 3
+    );
     
-    gtk_widget_queue_draw(widget);
+    //gtk_widget_queue_draw(widget);
     return TRUE;
 }
 
@@ -230,10 +244,11 @@ void create_main_window() {
     gtk_widget_set_size_request(drawing_area, 700, 500);
     g_signal_connect(G_OBJECT(drawing_area), "expose_event",
         G_CALLBACK(expose_event_callback), NULL);
-
+    
     gtk_box_pack_start(GTK_BOX(main_vbox), drawing_area, FALSE, TRUE, 0);
 
-    g_timeout_add(1000, (GSourceFunc)update_source_stream, (gpointer)main_window);
+    g_timeout_add(20, (GSourceFunc)update_source_stream, (gpointer)main_window);
     
     gtk_widget_show_all(main_window);
+    image_widget = drawing_area;
 }
