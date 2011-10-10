@@ -9,10 +9,10 @@ It captures camera images and process them.
 
 - Requirements: Gtk+, gcc, gdk, v4l2 
 - Clone the git repo:
-	$ git clone git://github.com/jami/videocapture.git
-	$ cd videocapture
-	$ make
-	$ ./videocapture
+    $ git clone git://github.com/jami/videocapture.git
+    $ cd videocapture
+    $ make
+    $ ./videocapture
 
 ### Known issues:
 
